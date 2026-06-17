@@ -86,8 +86,8 @@ public class SystemNode {
      * Sprawdza, czy dany węzeł ma wyższy priorytet (ID) niż węzeł bieżący.
      * Wykorzystywane bezpośrednio w logice komunikatów algorytmu Bully.
      */
-    public boolean hasLowerPriorityThan(int otherNodeId) {
-        return this.nodeId < otherNodeId;
+    public boolean hasHigherPriorityThan(int otherNodeId) {
+        return this.nodeId > otherNodeId;
     }
 
     /**

@@ -103,8 +103,8 @@ public class CacheRestController {
         switch (message.getType()) {
             case "ELECTION":
                 // Jeśli idzie do nas zapytanie od węzła o NIŻSZYM ID, odpowiadamy TRUE (czyli "OK - żyję i przejmuję wybory")
-                if (systemNode.hasLowerPriorityThan(message.getSenderNodeId())) {
-                    log.info("Węzeł {} ma niższy priorytet. Odpowiadam ANSWER i uruchamiam własne wybory.", message.getSenderNodeId());
+                if (systemNode.hasHigherPriorityThan(message.getSenderNodeId())) {
+                    log.info("Ten węzeł ma wyższy priorytet niż Węzeł {}. Odpowiadam ANSWER i uruchamiam własne wybory.", message.getSenderNodeId());
 
                     // Asynchronicznie odpalamy własne wybory do jeszcze wyższych węzłów
                     // (używamy wątku w tle, aby natychmiast zwrócić odpowiedź HTTP)

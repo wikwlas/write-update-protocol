@@ -7,7 +7,7 @@ import uvicorn
 import httpx
 import threading
 
-from app import config, database, udp_service, election
+from app import config, database, directory_manager, udp_service, election
 
 # Configure console logging formatting
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(threadName)s] %(levelname)s - %(message)s")
@@ -89,6 +89,8 @@ async def handle_user_update_request(key: str = Query(...), value: str = Query(.
 
         # Mutate local secure cache instance
         database.local_cache.put(key, value)
+        directory_manager.directory_manager.update_main_memory_value(key, value)
+        directory_manager.directory_manager.register_variable_presence(key, config.NODE_ID)
 
         # Structure standardized JSON payload architecture
         replication_payload = {
@@ -109,6 +111,7 @@ async def handle_user_update_request(key: str = Query(...), value: str = Query(.
                         json=replication_payload,
                         timeout=1.0
                     )
+                    directory_manager.directory_manager.register_variable_presence(key, peer_id)
                 except Exception as e:
                     logger.warning(f"Failed to cleanly replicate state updates down into Node {peer_id}: {e}")
 
@@ -140,6 +143,17 @@ async def handle_user_update_request(key: str = Query(...), value: str = Query(.
                     status_code=500,
                     content={"error": f"Proxy communication link failure with current Leader: {e}"}
                 )
+
+@app.get("/status")
+async def get_status():
+    return {
+        "nodeId": config.NODE_ID,
+        "leaderId": config.CURRENT_LEADER,
+        "isLeader": config.CURRENT_LEADER == config.NODE_ID,
+        "state": config.NODE_STATE,
+        "cache": database.local_cache.get_all(),
+        "directory": directory_manager.directory_manager.snapshot(),
+    }
 
 if __name__ == "__main__":
     # Launch application server bounds on local configurations

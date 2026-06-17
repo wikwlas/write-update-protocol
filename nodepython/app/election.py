@@ -1,7 +1,7 @@
 import httpx
 import logging
 import asyncio
-from app import config, database
+from app import config, database, directory_manager
 
 logger = logging.getLogger(__name__)
 
@@ -54,10 +54,9 @@ async def announce_victory():
     config.CURRENT_LEADER = config.NODE_ID
     config.NODE_STATE = "NORMAL"
     logger.info(f"Node {config.NODE_ID} is broadcasting itself as the NEW LEADER.")
-    
-    # Optional logic: If Python becomes the leader, it could query Java or .NET 
-    # to sync/restore the global directory/cache state.
-    
+
+    await reconstruct_global_directory_from_peers()
+
     # Broadcast the COORDINATOR message to all active peers
     async with httpx.AsyncClient() as client:
         for peer_id, peer_info in config.PEERS.items():
@@ -69,3 +68,37 @@ async def announce_victory():
                 )
             except Exception:
                 logger.debug(f"Failed to send COORDINATOR message to Node {peer_id}.")
+
+
+async def reconstruct_global_directory_from_peers():
+    logger.info("Reconstructing Python leader directory from active peer caches...")
+    directory_manager.directory_manager.clear()
+
+    for variable_name, value in database.local_cache.get_all().items():
+        directory_manager.directory_manager.register_variable_presence(variable_name, config.NODE_ID)
+        directory_manager.directory_manager.update_main_memory_value(variable_name, value)
+
+    async with httpx.AsyncClient() as client:
+        for peer_id, peer_info in config.PEERS.items():
+            try:
+                response = await client.get(
+                    f"{peer_info['url']}/reconstruct-directory",
+                    timeout=1.0,
+                )
+                response.raise_for_status()
+                peer_cache = response.json()
+            except Exception as exc:
+                logger.warning(f"Could not reconstruct directory from Node {peer_id}: {exc}")
+                continue
+
+            if not isinstance(peer_cache, dict):
+                logger.warning(f"Node {peer_id} returned an invalid cache snapshot.")
+                continue
+
+            for variable_name, value in peer_cache.items():
+                directory_manager.directory_manager.register_variable_presence(variable_name, peer_id)
+                directory_manager.directory_manager.update_main_memory_value(variable_name, str(value))
+
+            logger.info(f"Directory reconstruction imported cache snapshot from Node {peer_id}.")
+
+    logger.info("Python leader directory reconstruction completed.")
