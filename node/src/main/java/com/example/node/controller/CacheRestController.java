@@ -15,8 +15,8 @@ import org.springframework.web.bind.annotation.*;
 import java.util.Map;
 
 /**
- * Główny kontroler REST aplikacji (odpowiednik komponentu RestAPI z projektu).
- * Obsługuje żądania od klientów oraz komunikację P2P z pozostałymi węzłami (C# i Python).
+ * Main REST controller for the application, equivalent to the RestAPI component in the project design.
+ * Handles client requests and P2P communication with the remaining nodes (C# and Python).
  */
 @Slf4j
 @RestController
@@ -31,91 +31,91 @@ public class CacheRestController {
     private final org.springframework.web.reactive.function.client.WebClient.Builder webClientBuilder;
 
     /**
-     * Endpoint wywoływany przez lokalnego użytkownika/aplikację w celu zapisu lub modyfikacji zmiennej.
-     * Realizuje strategię opisaną na diagramie sekwencji w planie projektu.
+     * Endpoint called by a local user or application to write or modify a variable.
+     * Implements the strategy described in the project sequence diagram.
      */
     @PostMapping("/update-request")
     public ResponseEntity<String> handleUserUpdateRequest(@RequestParam String key, @RequestParam String value) {
-        log.info("Otrzymano lokalne żądanie zapisu: {} = {}", key, value);
+        log.info("Received local write request: {} = {}", key, value);
 
         if (systemNode.isLeader()) {
-            // Sytuacja A: Jesteśmy Liderem (Home Node)
-            // 1. Aktualizujemy pamięć główną i rejestrujemy obecność u siebie
+            // Case A: this node is the leader (Home Node).
+            // 1. Update main memory and register local presence.
             directoryManager.updateMainMemoryValue(key, value);
             directoryManager.registerVariablePresence(key, systemNode.getNodeId());
             localCache.put(key, value);
 
-            // 2. Pobieramy listę innych węzłów posiadających tę zmienną i wysyłamy Write-Update Broadcast
+            // 2. Fetch the nodes that hold this variable and send a Write-Update broadcast.
             replicationService.broadcastUpdate(key, value);
-            return ResponseEntity.ok("Zmienna zaktualizowana i rozreplikowana przez Lidera.");
+            return ResponseEntity.ok("Variable updated and replicated by the leader.");
         } else {
             int leaderId = systemNode.getLeaderId();
             String leaderUrl = systemNode.getPeers().get(leaderId);
 
-            log.info("Węzeł 3 działa jako Proxy. Przekazuję żądanie do lidera na port {}", leaderId);
+            log.info("Node 3 is acting as a proxy. Forwarding request to leader Node {}", leaderId);
 
-            // Synchroniczne (blokujące .block()) oczekiwanie na odpowiedź lidera w imieniu klienta
+            // Synchronously wait for the leader response on behalf of the client.
             String responseFromLeader = webClientBuilder.build()
                     .post()
                     .uri(leaderUrl + "/update-request?key=" + key + "&value=" + value)
                     .retrieve()
                     .bodyToMono(String.class)
-                    .block(); // czekamy na wynik, aby oddać go użytkownikowi
+                    .block(); // Wait for the result before responding to the user.
 
-            return ResponseEntity.ok("Odpowiedź od Lidera za pośrednictwem Proxy: " + responseFromLeader);
+            return ResponseEntity.ok("Response from leader via proxy: " + responseFromLeader);
         }
     }
 
     /**
-     * Endpoint wymuszonej aktualizacji (Write-Update) wywoływany przez Lidera w sieci P2P.
-     * Zmusza nasz lokalny cache do natychmiastowego nadpisania wartości w sposób bezpieczny wątkowo.
+     * Forced update endpoint (Write-Update) called by the leader in the P2P network.
+     * Forces the local cache to overwrite the value immediately in a thread-safe way.
      */
     @PostMapping("/force-update")
     public ResponseEntity<Void> handleForceUpdate(@RequestBody CacheUpdateRequest updateRequest) {
-        log.info("Sieć P2P: Otrzymano wymuszoną aktualizację (Write-Update) od Węzła {} dla: {} = {}",
+        log.info("P2P network: received forced Write-Update from Node {} for: {} = {}",
                 updateRequest.getSenderNodeId(), updateRequest.getVariableName(), updateRequest.getNewValue());
 
-        // Zapis do pamięci podręcznej chroniony blokadą klasy LocalCache (odpowiedź na Zarzut 4)
+        // Cache write protected by the LocalCache lock.
         localCache.put(updateRequest.getVariableName(), updateRequest.getNewValue());
 
         return ResponseEntity.ok().build();
     }
 
     /**
-     * NOWOŚĆ (Naprawa Zarzutu 1 i 5): Endpoint wywoływany przez nowego lidera po wygranych wyborach.
-     * Nowy lider prosi nasz węzeł o zrzut lokalnego cache, aby odtworzyć swój "Pusty Katalog".
+     * Endpoint called by a newly elected leader after winning an election.
+     * The new leader requests a local cache dump to rebuild its empty directory.
      */
     @GetMapping("/reconstruct-directory")
     public ResponseEntity<Map<String, String>> handleDirectoryReconstructionRequest() {
-        log.info("Sieć P2P: Nowy lider żąda zrzutu lokalnego cache w celu rekonstrukcji globalnego katalogu.");
+        log.info("P2P network: new leader requested a local cache dump for global directory reconstruction.");
 
-        // Zwracamy niemodyfikowalną mapę naszego cache [Zmienna -> Wartość]
+        // Return an unmodifiable local cache map [variable -> value].
         return ResponseEntity.ok(localCache.getAll());
     }
 
     /**
-     * Obsługa komunikatów sieciowych protokołu wyboru lidera (Algorytm Bully).
+     * Handles network messages for the leader election protocol (Bully Algorithm).
      */
     @PostMapping("/election")
     public ResponseEntity<Boolean> handleElectionMessage(@RequestBody ElectionMessage message) {
-        log.info("Algorytm Bully: Otrzymano komunikat typu '{}' od Węzła {}", message.getType(), message.getSenderNodeId());
+        log.info("Bully Algorithm: received '{}' message from Node {}", message.getType(), message.getSenderNodeId());
 
         switch (message.getType()) {
             case "ELECTION":
-                // Jeśli idzie do nas zapytanie od węzła o NIŻSZYM ID, odpowiadamy TRUE (czyli "OK - żyję i przejmuję wybory")
+                // If the request comes from a lower-ID node, answer TRUE and take over the election.
                 if (systemNode.hasHigherPriorityThan(message.getSenderNodeId())) {
-                    log.info("Ten węzeł ma wyższy priorytet niż Węzeł {}. Odpowiadam ANSWER i uruchamiam własne wybory.", message.getSenderNodeId());
+                    log.info("This node has higher priority than Node {}. Answering and starting its own election.", message.getSenderNodeId());
 
-                    // Asynchronicznie odpalamy własne wybory do jeszcze wyższych węzłów
-                    // (używamy wątku w tle, aby natychmiast zwrócić odpowiedź HTTP)
+                    // Start our own election asynchronously against even higher-priority nodes.
+                    // Use a background thread so the HTTP response can return immediately.
                     new Thread(electionService::startElection).start();
                     return ResponseEntity.ok(true);
                 }
                 return ResponseEntity.ok(false);
 
             case "COORDINATOR":
-                // Silniejszy węzeł ogłosił się nowym Koordynatorem/Liderem sieci
-                log.info("Uznano nowego lidera sieci: Węzeł {}", message.getSenderNodeId());
+                // A stronger node announced itself as the new coordinator/leader.
+                log.info("Accepted new network leader: Node {}", message.getSenderNodeId());
                 systemNode.updateLeader(message.getSenderNodeId());
                 return ResponseEntity.ok().build();
 
@@ -125,7 +125,7 @@ public class CacheRestController {
     }
 
     /**
-     * Prosty endpoint GET pozwalający użytkownikowi/testerowi sprawdzić zawartość lokalnego cache na danym węźle.
+     * Simple GET endpoint for users/testers to inspect the local cache on this node.
      */
     @GetMapping("/cache/{key}")
     public ResponseEntity<String> getFromCache(@PathVariable String key) {

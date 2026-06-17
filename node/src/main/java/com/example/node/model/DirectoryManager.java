@@ -10,57 +10,57 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 /**
- * Komponent zarządzający globalnym katalogiem spójności (Directory Manager).
- * Klasa ta jest w pełni operacyjna wyłącznie na aktywnym Liderze (Home Node).
- * * Odpowiada za:
- * 1. presenceList - śledzenie, które węzły posiadają kopię danej zmiennej.
- * 2. mainMemory  - przechowywanie nadrzędnych, najbardziej aktualnych wartości zmiennych.
+ * Component managing the global coherence directory (Directory Manager).
+ * This class is fully operational only on the active leader (Home Node).
+ * It is responsible for:
+ * 1. presenceList - tracking which nodes hold a copy of a given variable.
+ * 2. mainMemory - storing authoritative, most recent variable values.
  */
 @Slf4j
 @Component
 public class DirectoryManager {
 
-    // Globalna mapa obecności: [Nazwa_Zmiennej -> Set z ID węzłów, które ją posiadają]
+    // Global presence map: [variableName -> set of node IDs that hold it].
     private final Map<String, Set<Integer>> presenceList = new ConcurrentHashMap<>();
 
-    // Główna pamięć wirtualna klastra: [Nazwa_Zmiennej -> Aktualna_Wartość]
+    // Cluster virtual main memory: [variableName -> currentValue].
     private final Map<String, String> mainMemory = new ConcurrentHashMap<>();
 
-    // Blokada Read/Write chroniąca całościową spójność struktur przed wyścigami (Race Conditions)
+    // Read/write lock protecting structure consistency against race conditions.
     private final ReentrantReadWriteLock rwLock = new ReentrantReadWriteLock();
 
     /**
-     * Rejestruje informację, że dany węzeł posiada kopię określonej zmiennej w swoim cache.
-     * Metoda kluczowa dla odtwarzania stanu katalogu po awarii poprzedniego lidera.
+     * Registers that a given node holds a copy of the selected variable in its cache.
+     * This method is key for restoring directory state after the previous leader fails.
      */
     public void registerVariablePresence(String variableName, int nodeId) {
         rwLock.writeLock().lock();
         try {
             presenceList.computeIfAbsent(variableName, k -> new HashSet<>()).add(nodeId);
-            log.debug("Katalog: Zarejestrowano obecność zmiennej '{}' na Węźle {}.", variableName, nodeId);
+            log.debug("Directory: registered presence of variable '{}' on Node {}.", variableName, nodeId);
         } finally {
             rwLock.writeLock().unlock();
         }
     }
 
     /**
-     * Aktualizuje wartość w pamięci głównej klastra (Main Memory).
+     * Updates the value in cluster main memory.
      */
     public void updateMainMemoryValue(String variableName, String value) {
         rwLock.writeLock().lock();
         try {
             mainMemory.put(variableName, value);
-            log.debug("Katalog: Zaktualizowano pamięć główną dla '{}' = {}.", variableName, value);
+            log.debug("Directory: updated main memory for '{}' = {}.", variableName, value);
         } finally {
             rwLock.writeLock().unlock();
         }
     }
 
     /**
-     * Pobiera zestaw identyfikatorów węzłów, które posiadają kopię danej zmiennej.
-     * Wykorzystywane przez Lidera do określenia adresatów wiadomości typu Write-Update (Broadcast).
+     * Returns the node IDs that hold a copy of the selected variable.
+     * Used by the leader to select recipients for Write-Update broadcast messages.
      *
-     * @return Set zawierający ID węzłów lub pusty zestaw, jeśli nikt nie ma zmiennej.
+     * @return set containing node IDs, or an empty set if nobody has the variable.
      */
     public Set<Integer> getOwnersOf(String variableName) {
         rwLock.readLock().lock();
@@ -73,7 +73,7 @@ public class DirectoryManager {
     }
 
     /**
-     * Pobiera aktualną wartość zmiennej zapisaną w pamięci głównej klastra.
+     * Returns the current variable value stored in cluster main memory.
      */
     public String getValueFromMainMemory(String variableName) {
         rwLock.readLock().lock();
@@ -85,31 +85,30 @@ public class DirectoryManager {
     }
 
     /**
-     * Czyści całkowicie stan katalogu głównego.
-     * Metoda wywoływana obowiązkowo przez BullyElectionService przed przystąpieniem
-     * do odpytywania rówieśników w celu eliminacji problemu "Pustego Katalogu".
+     * Fully clears the global directory state.
+     * Called by BullyElectionService before querying peers to eliminate the empty directory problem.
      */
     public void clearDirectory() {
         rwLock.writeLock().lock();
         try {
             presenceList.clear();
             mainMemory.clear();
-            log.info("Katalog globalny został zresetowany i wyczyszczony w celu rekonstrukcji stanu.");
+            log.info("Global directory was reset and cleared for state reconstruction.");
         } finally {
             rwLock.writeLock().unlock();
         }
     }
 
     /**
-     * Usuwa węzeł z listy obecności dla wszystkich zmiennych.
-     * Przydatne, gdy wykryjemy trwały timeout (awarię) jakiegoś followera.
+     * Removes a node from the presence list for all variables.
+     * Useful after detecting a permanent timeout or follower failure.
      */
     public void removeNodeFromPresence(int failedNodeId) {
         rwLock.writeLock().lock();
         try {
             presenceList.forEach((varName, nodesSet) -> {
                 if (nodesSet.remove(failedNodeId)) {
-                    log.info("Katalog: Usunięto zmarły Węzeł {} z listy współdzielenia zmiennej '{}'.", failedNodeId, varName);
+                    log.info("Directory: removed failed Node {} from the sharing list for variable '{}'.", failedNodeId, varName);
                 }
             });
         } finally {

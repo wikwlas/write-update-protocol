@@ -12,8 +12,8 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Serwis odpowiedzialny za odbieranie i analizę pakietów UDP Heartbeat.
- * Monitoruje stan zdrowia klastra P2P i wykrywa awarie innych węzłów.
+ * Service responsible for receiving and analyzing UDP heartbeat packets.
+ * Monitors P2P cluster health and detects failures of other nodes.
  */
 @Slf4j
 @Service
@@ -22,77 +22,77 @@ public class UdpHeartbeatReceiver {
 
     private final SystemNode systemNode;
     private final BullyElectionService electionService;
-    private final ObjectMapper objectMapper; // Do bezpiecznego parsowania JSON z innych środowisk
+    private final ObjectMapper objectMapper; // Safely parses JSON from other environments.
 
-    // Bezpieczna mapa przechowująca: [ID_Węzła -> Znacznik_Czasu_Ostatniego_Heartbeatu]
+    // Thread-safe map storing: [node ID -> last heartbeat timestamp].
     private final Map<Integer, Long> lastHeartbeats = new ConcurrentHashMap<>();
 
-    // Maksymalny czas braku odpowiedzi (np. 5 sekund) przed uznaniem węzła za martwy
+    // Maximum time without a response before considering a node dead.
     private static final long TIMEOUT_MS = 5000;
 
     /**
-     * Metoda wywoływana przez UdpConfig po odebraniu pakietu UDP.
-     * Przetwarza wiadomość tekstową pochodzącą z dowolnego środowiska (Java, C#, Python).
+     * Method called by UdpConfig after receiving a UDP packet.
+     * Processes text messages coming from any environment (Java, C#, Python).
      */
     public void processHeartbeat(String payload) {
         try {
             int senderNodeId;
 
-            // Obsługa elastyczności (zarzut 6 prowadzącego - heterogeniczność)
-            // Sprawdzamy, czy przyszedł JSON, czy prosty tekst
+            // Compatibility handling for heterogeneous payload formats.
+            // Check whether the payload is JSON or plain text.
             if (payload.trim().startsWith("{")) {
                 JsonNode jsonNode = objectMapper.readTree(payload);
                 senderNodeId = jsonNode.get("nodeId").asInt();
             } else {
-                // Założenie, że tekst to np. "HEARTBEAT_FROM_NODE_1"
+                // Assume plain text looks like "HEARTBEAT_FROM_NODE_1".
                 senderNodeId = Integer.parseInt(payload.replaceAll("[^0-9]", ""));
             }
 
-            // Aktualizacja czasu ostatniego kontaktu w bezpiecznej dla wątków mapie
+            // Update the last contact time in the thread-safe map.
             lastHeartbeats.put(senderNodeId, System.currentTimeMillis());
-            log.debug("Odrzymano UDP Heartbeat od Węzła {}", senderNodeId);
+            log.debug("Received UDP heartbeat from Node {}", senderNodeId);
 
         } catch (Exception e) {
-            log.error("Błąd podczas parsowania pakietu UDP Heartbeat: {}. Surowa treść: {}", e.getMessage(), payload);
+            log.error("Error while parsing UDP heartbeat packet: {}. Raw payload: {}", e.getMessage(), payload);
         }
     }
 
     /**
-     * Weryfikator działający cyklicznie w tle (np. co 2 sekundy).
-     * Sprawdza, czy któryś z aktywnych węzłów (w szczególności Lider) nie uległ awarii.
+     * Background verifier running periodically (for example every 2 seconds).
+     * Checks whether any active node, especially the leader, has failed.
      */
     @Scheduled(fixedRate = 2000)
     public void checkNodeTimeouts() {
         long currentTime = System.currentTimeMillis();
 
-        // Pobieramy z SystemNode aktualną listę znanych nam rówieśników (peers) z konfiguracji
+        // Fetch the current list of known peers from SystemNode configuration.
         for (Integer peerId : systemNode.getPeers().keySet()) {
             Long lastContact = lastHeartbeats.get(peerId);
 
-            // Jeśli kiedykolwiek mieliśmy kontakt z tym węzłem, sprawdzamy timeout
+            // If this node was seen before, check whether it timed out.
             if (lastContact != null && (currentTime - lastContact) > TIMEOUT_MS) {
-                log.warn("Wykryto timeout dla Węzła {}! Brak odpowiedzi przez {} ms.", peerId, (currentTime - lastContact));
+                log.warn("Detected timeout for Node {}! No response for {} ms.", peerId, (currentTime - lastContact));
 
-                // Usunięcie z mapy, aby nie triggerować błędu w nieskończoność
+                // Remove from the map to avoid triggering the same failure forever.
                 lastHeartbeats.remove(peerId);
 
-                // Wywołanie logiki obsługi awarii węzła
+                // Invoke node failure handling logic.
                 handleNodeFailure(peerId);
             }
         }
     }
 
     /**
-     * Reakcja na awarię sieciową lub crash procesu innego węzła.
+     * Reacts to a network failure or another node process crash.
      */
     private void handleNodeFailure(int failedNodeId) {
-        // Jeśli z systemu zniknął aktualny Lider, musimy natychmiast ogłosić nowe wybory!
+        // If the current leader disappeared, start a new election immediately.
         if (systemNode.getLeaderId() == failedNodeId) {
-            log.warn("Zgłoszono awarię Lidera (Węzeł {}). Uruchamianie algorytmu Bully...", failedNodeId);
-            electionService.startElection(); // Przejście do stanu Election
+            log.warn("Leader failure reported (Node {}). Starting Bully algorithm...", failedNodeId);
+            electionService.startElection(); // Transition to Election state.
         } else {
-            // Awaria zwykłego węzła (Followera) - Lider uaktualnia swój katalog (obecność), jeśli to konieczne
-            log.info("Węzeł {} (Follower) jest nieaktywny. System kontynuuje pracę.", failedNodeId);
+            // Regular follower failure; the leader updates its directory if needed.
+            log.info("Node {} (Follower) is inactive. The system continues operating.", failedNodeId);
         }
     }
 }

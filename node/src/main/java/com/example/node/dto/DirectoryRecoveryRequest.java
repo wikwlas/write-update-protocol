@@ -5,11 +5,10 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 /**
- * Data Transfer Object (DTO) używany podczas procedury rekonstrukcji katalogu globalnego.
- * * Klasa ta definiuje strukturę zapytania wysyłanego przez nowo wybranego Lidera
- * (lub węzeł w stanie Recovery) do pozostałych węzłów (C# i Python) w celu
- * zebrania informacji o stanie ich lokalnych pamięci podręcznych (Local Cache).
- * * Bezpośrednio rozwiązuje zarzut nr 1 i 5 prowadzącego dotyczące "Pustego Katalogu".
+ * Data Transfer Object (DTO) used during global directory reconstruction.
+ * Defines the request structure sent by a newly elected leader, or a node in recovery,
+ * to the remaining nodes (C# and Python) to collect their local cache state.
+ * Addresses the empty directory problem described in the design review.
  */
 @Data
 @NoArgsConstructor
@@ -17,22 +16,21 @@ import lombok.NoArgsConstructor;
 public class DirectoryRecoveryRequest {
 
     /**
-     * Identyfikator nowego lidera, który żąda zrzutu danych (np. 3 dla Javy).
-     * Pozwala węzłowi odbierającemu zweryfikować, czy żądanie pochodzi od
-     * uprawnionego koordynatora sieci.
+     * Identifier of the new leader requesting the data dump, for example 3 for Java.
+     * Lets the receiving node verify that the request came from an authorized network coordinator.
      */
     private int requesterNodeId;
 
     /**
-     * Unikalny token lub identyfikator sesji odzyskiwania stanu.
-     * Pomaga w synchronizacji asynchronicznych komunikatów i zapobiega
-     * ponownemu przetwarzaniu przestarzałych żądań rekonstrukcji.
+     * Unique token or state recovery session identifier.
+     * Helps synchronize asynchronous messages and prevents stale reconstruction requests
+     * from being processed again.
      */
     private String recoverySessionId;
 
     /**
-     * Znacznik czasu (timestamp) utworzenia żądania.
-     * Służy do weryfikacji aktualności żądania w środowisku rozproszonym.
+     * Timestamp of request creation.
+     * Used to verify request freshness in a distributed environment.
      */
     private long timestamp;
 }

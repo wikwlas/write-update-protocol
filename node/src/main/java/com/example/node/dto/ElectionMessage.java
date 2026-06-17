@@ -5,9 +5,9 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 /**
- * Data Transfer Object (DTO) reprezentujący komunikat w algorytmie Bully.
- * Klasa definiuje ujednolicony kontrakt wymiany danych JSON pomiędzy
- * środowiskami Java (Windows), C# (Linux) oraz Python (macOS).
+ * Data Transfer Object (DTO) representing a Bully algorithm message.
+ * Defines a unified JSON data exchange contract between Java (Windows),
+ * C# (Linux), and Python (macOS) environments.
  */
 @Data
 @NoArgsConstructor
@@ -15,18 +15,18 @@ import lombok.NoArgsConstructor;
 public class ElectionMessage {
 
     /**
-     * Identyfikator węzła, który nadaje dany komunikat (np. 1, 2 lub 3).
-     * W heterogenicznym środowisku przesyłany jako standardowy prymityw int (32-bit),
-     * co zapobiega problemom z interpretacją rozmiaru typów numerycznych.
+     * Identifier of the node sending this message, for example 1, 2, or 3.
+     * Sent as a standard 32-bit int in the heterogeneous environment to avoid
+     * numeric type size interpretation issues.
      */
     private int senderNodeId;
 
     /**
-     * Typ komunikatu algorytmu Bully.
-     * Dozwolone i oczekiwane wartości zgodne z protokołem to:
-     * - "ELECTION"    : Inicjalizacja wyborów (wysyłana do węzłów o wyższym ID).
-     * - "ANSWER"      : Odpowiedź "OK" od wyższego węzła (przerywa ogłaszanie się liderem przez nadawcę).
-     * - "COORDINATOR" : Ogłoszenie zwycięstwa i objęcie roli Lidera przez nadawcę.
+     * Bully algorithm message type.
+     * Allowed and expected protocol values:
+     * - "ELECTION"    : election initialization sent to nodes with higher IDs.
+     * - "ANSWER"      : "OK" response from a higher node, stopping the sender from becoming leader.
+     * - "COORDINATOR" : victory announcement and leader role takeover by the sender.
      */
     private String type;
 }

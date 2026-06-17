@@ -9,55 +9,54 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
- * Klasa reprezentująca lokalną pamięć podręczną węzła (Local Cache).
- * * Odpowiada za bezpieczne przechowywanie par [Nazwa_Zmiennej -> Wartość] w pamięci RAM.
- * * Wykorzystuje rygorystyczne mechanizmy współbieżności w celu wyeliminowania
- * wyścigów (Race Conditions) zgłoszonych w zarzucie nr 4 prowadzącego.
+ * Represents the node's local cache.
+ * Stores [variableName -> value] pairs safely in memory.
+ * Uses strict concurrency controls to eliminate race conditions.
  */
 @Slf4j
 @Component
 public class LocalCache {
 
-    // Bezpieczna mapa przechowująca lokalne kopie zmiennych klastra
+    // Thread-safe map storing local copies of cluster variables.
     private final Map<String, String> cacheStorage = new ConcurrentHashMap<>();
 
-    // Mapa przechowująca dedykowane blokady dla każdej zmiennej osobno (Granular Locking)
+    // Map storing dedicated locks per variable (granular locking).
     private final Map<String, ReentrantLock> variableLocks = new ConcurrentHashMap<>();
 
     /**
-     * Pobiera wartość zmiennej z lokalnego cache (Operacja odczytu - nieblokująca).
-     * Zgodnie z protokołami cache coherence, lokalny odczyt z prawidłowego stanu jest natychmiastowy.
+     * Reads a variable value from the local cache.
+     * Under cache coherence protocols, reading a valid local state is immediate.
      *
-     * @param variableName nazwa zmiennej (klucz)
-     * @return wartość zmiennej lub null, jeśli nie istnieje w lokalnym cache
+     * @param variableName variable name (key)
+     * @return variable value, or null if it does not exist in the local cache
      */
     public String get(String variableName) {
         return cacheStorage.get(variableName);
     }
 
     /**
-     * Zapisuje lub aktualizuje wartość w lokalnej pamięci podręcznej.
-     * Metoda zabezpieczona blokadą Lock dla konkretnej zmiennej, aby zapobiec konfliktom
-     * jednoczesnego zapisu lokalnego i sieciowego (Write-Update od innego węzła).
+     * Writes or updates a value in the local cache.
+     * Protected by a per-variable lock to prevent conflicts between local writes
+     * and network writes (Write-Update from another node).
      *
-     * @param variableName nazwa zmiennej
-     * @param value nowa wartość do zapisania
+     * @param variableName variable name
+     * @param value new value to store
      */
     public void put(String variableName, String value) {
-        // Pobieramy istniejący lock dla danej zmiennej lub tworzymy nowy, jeśli to jej pierwszy zapis
+        // Fetch the existing lock for this variable or create one for the first write.
         ReentrantLock lock = variableLocks.computeIfAbsent(variableName, k -> new ReentrantLock());
 
-        lock.lock(); // Blokujemy krytyczną sekcję zapisu dla tej konkretnej zmiennej
+        lock.lock(); // Lock the critical write section for this variable.
         try {
             cacheStorage.put(variableName, value);
-            log.info("Lokalny Cache: Zaktualizowano stan zmiennej '{}' = '{}'", variableName, value);
+            log.info("Local Cache: updated variable state '{}' = '{}'", variableName, value);
         } finally {
-            lock.unlock(); // Obowiązkowe zwolnienie blokady w bloku finally
+            lock.unlock(); // Always release the lock in finally.
         }
     }
 
     /**
-     * Usuwa zmienną z lokalnego cache (np. w przypadku inwalidacji).
+     * Removes a variable from the local cache, for example after invalidation.
      */
     public void remove(String variableName) {
         ReentrantLock lock = variableLocks.get(variableName);
@@ -66,7 +65,7 @@ public class LocalCache {
             try {
                 cacheStorage.remove(variableName);
                 variableLocks.remove(variableName);
-                log.info("Lokalny Cache: Usunięto zmienną '{}' z pamięci podręcznej.", variableName);
+                log.info("Local Cache: removed variable '{}' from cache.", variableName);
             } finally {
                 lock.unlock();
             }
@@ -76,20 +75,20 @@ public class LocalCache {
     }
 
     /**
-     * Zwraca niemodyfikowalny widok całego lokalnego cache.
-     * Wykorzystywane przez BullyElectionService podczas procedury rekonstrukcji katalogu,
-     * kiedy nowy Lider prosi o zrzut lokalnej pamięci (Directory Manager Recovery).
+     * Returns an unmodifiable view of the full local cache.
+     * Used by BullyElectionService during directory reconstruction when the new leader
+     * requests a local memory dump (Directory Manager Recovery).
      */
     public Map<String, String> getAll() {
         return Collections.unmodifiableMap(cacheStorage);
     }
 
     /**
-     * Czyszczenie całego cache (np. podczas pełnego resetu węzła).
+     * Clears the full cache, for example during a full node reset.
      */
     public void clear() {
         cacheStorage.clear();
         variableLocks.clear();
-        log.info("Lokalny Cache został całkowicie wyczyszczony.");
+        log.info("Local Cache was fully cleared.");
     }
 }

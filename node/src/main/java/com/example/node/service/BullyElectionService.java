@@ -16,8 +16,8 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Serwis realizujący algorytm wyboru lidera (Bully Algorithm)
- * oraz procedurę odzyskiwania stanu po awarii (State Recovery).
+ * Service implementing the Bully leader election algorithm
+ * and state recovery after failures.
  */
 @Slf4j
 @Service
@@ -26,56 +26,55 @@ public class BullyElectionService {
 
     private final SystemNode systemNode;
     private final LocalCache localCache;
-    private final DirectoryManager directoryManager; // Komponent aktywowany po wygranych wyborach
+    private final DirectoryManager directoryManager; // Component activated after winning an election.
     private final WebClient.Builder webClientBuilder;
 
     private final AtomicBoolean electionInProgress = new AtomicBoolean(false);
 
     /**
-     * Inicjuje procedurę wyborów (wywoływane po wykryciu timeoutu Lidera lub przy starcie węzła/Recovery).
+     * Starts the election procedure after a leader timeout or during node startup/recovery.
      */
     public void startElection() {
-        // Zabezpieczenie przed wielokrotnym uruchomieniem procedury w tym samym czasie
+        // Prevent multiple election procedures from running at the same time.
         if (!electionInProgress.compareAndSet(false, true)) {
-            log.info("Wybory są już w toku. Ignorowanie ponownego wywołania.");
+            log.info("Election is already in progress. Ignoring duplicate trigger.");
             return;
         }
 
         systemNode.setState("ELECTION");
-        log.info("Węzeł {} rozpoczyna procedurę wyborów lidera (Algorytm Bully)...", systemNode.getNodeId());
+        log.info("Node {} is starting the leader election procedure (Bully Algorithm)...", systemNode.getNodeId());
 
-        // Filtrujemy węzły, które mają WYŻSZE ID niż nasze
+        // Filter nodes with IDs higher than this node's ID.
         Map<Integer, String> higherNodes = systemNode.getPeers().entrySet().stream()
                 .filter(entry -> entry.getKey() > systemNode.getNodeId())
                 .collect(java.util.stream.Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
 
         if (higherNodes.isEmpty()) {
-            // Jesteśmy węzłem o najwyższym ID w sieci (Węzeł 3 zazwyczaj tak ma)!
-            // Automatycznie wygrywamy wybory.
-            log.info("Brak węzłów o wyższym ID. Węzeł {} ogłasza się nowym Liderem.", systemNode.getNodeId());
+            // This node has the highest ID in the network, so it automatically wins.
+            log.info("No nodes with higher IDs found. Node {} announces itself as the new leader.", systemNode.getNodeId());
             announceVictory();
         } else {
-            // Wysyłamy komunikat ELECTION do węzłów o wyższym ID
+            // Send an ELECTION message to nodes with higher IDs.
             AtomicBoolean receivedAnswer = new AtomicBoolean(false);
 
             Flux.fromIterable(higherNodes.entrySet())
                     .flatMap(entry -> sendElectionMessage(entry.getValue(), entry.getKey()))
-                    .timeout(Duration.ofMillis(1500)) // Agresywny timeout sieciowy, aby nie blokować systemu
+                    .timeout(Duration.ofMillis(1500)) // Aggressive network timeout to avoid blocking the system.
                     .doOnNext(answer -> {
                         if (Boolean.TRUE.equals(answer)) {
                             receivedAnswer.set(true);
                         }
                     })
-                    .onErrorResume(e -> Mono.empty()) // Ignorujemy błędy połączenia (węzeł wyłączony)
+                    .onErrorResume(e -> Mono.empty()) // Ignore connection errors (node is offline).
                     .then()
                     .doOnTerminate(() -> {
                         if (!receivedAnswer.get()) {
-                            // Żaden wyższy węzeł nie odpowiedział w wyznaczonym czasie – wygrywamy!
-                            log.info("Żaden węzeł o wyższym ID nie odpowiedział. Węzeł {} wygrywa wybory.", systemNode.getNodeId());
+                            // No higher node answered in time, so this node wins.
+                            log.info("No node with a higher ID answered. Node {} wins the election.", systemNode.getNodeId());
                             announceVictory();
                         } else {
-                            // Ktoś wyższy odpowiedział, więc przejmuje proces wyborów. Czekamy na jego ogłoszenie (COORDINATOR)
-                            log.info("Wyższy węzeł odpowiedział. Ustępowanie miejsca w wyborach i oczekiwanie na nowego lidera.");
+                            // A higher node answered and takes over the election process.
+                            log.info("A higher-priority node answered. Waiting for the new leader announcement.");
                             electionInProgress.set(false);
                         }
                     })
@@ -84,7 +83,7 @@ public class BullyElectionService {
     }
 
     /**
-     * Wysyła komunikat typu ELECTION do konkretnego węzła.
+     * Sends an ELECTION message to a specific node.
      */
     private Mono<Boolean> sendElectionMessage(String nodeUrl, int targetNodeId) {
         WebClient client = webClientBuilder.baseUrl(nodeUrl).build();
@@ -93,21 +92,20 @@ public class BullyElectionService {
                 .bodyValue(new ElectionMessage(systemNode.getNodeId(), "ELECTION"))
                 .retrieve()
                 .bodyToMono(Boolean.class)
-                .doOnError(err -> log.debug("Węzeł {} nie odpowiedział na komunikat wyborczy (prawdopodobnie offline).", targetNodeId))
+                .doOnError(err -> log.debug("Node {} did not answer the election message (probably offline).", targetNodeId))
                 .onErrorReturn(false);
     }
 
     /**
-     * Ogłoszenie zwycięstwa i wysłanie komunikatu COORDINATOR do wszystkich pozostałych węzłów.
+     * Announces victory and sends the COORDINATOR message to all remaining nodes.
      */
     private void announceVictory() {
         systemNode.updateLeader(systemNode.getNodeId());
 
-        // KROK NAPRAWCZY (Zarzut 1, 2 i 5 prowadzącego):
-        // Zanim zaczniemy w pełni zarządzać siecią, musimy odtworzyć dane katalogu globalnego.
+        // Recovery step: rebuild the global directory before managing the network.
         reconstructGlobalDirectoryFromPeers();
 
-        // Rozsyłanie wiadomości COORDINATOR do rówieśników (asynchronicznie, nieblokująco)
+        // Send COORDINATOR messages to peers asynchronously and non-blockingly.
         Flux.fromIterable(systemNode.getPeers().entrySet())
                 .flatMap(entry -> {
                     WebClient client = webClientBuilder.baseUrl(entry.getValue()).build();
@@ -121,26 +119,26 @@ public class BullyElectionService {
                 .subscribe();
 
         electionInProgress.set(false);
-        log.info("Węzeł {} pomyślnie rozesłał status nowego Lidera (COORDINATOR) i zakończył wybory.", systemNode.getNodeId());
+        log.info("Node {} successfully broadcast the new leader status (COORDINATOR) and finished the election.", systemNode.getNodeId());
     }
 
     /**
-     * Procedura rekonstrukcji globalnego katalogu (Directory Manager) na nowo wybranym liderze.
-     * Pobiera kopie lokalnych pamięci podręcznych od wszystkich aktywnych węzłów (C# i Python).
+     * Reconstructs the global directory (Directory Manager) on the newly elected leader.
+     * Pulls local cache copies from all active nodes (C# and Python).
      */
     private void reconstructGlobalDirectoryFromPeers() {
-        log.info("Uruchamianie procedury rekonstrukcji stanu katalogu z aktywnych węzłów...");
+        log.info("Starting directory state reconstruction from active nodes...");
 
-        // Czyszczenie starego, niepewnego stanu katalogu lokalnego
+        // Clear the old, uncertain local directory state.
         directoryManager.clearDirectory();
 
         Flux.fromIterable(systemNode.getPeers().entrySet())
                 .flatMap(entry -> {
                     WebClient client = webClientBuilder.baseUrl(entry.getValue()).build();
                     return client.get()
-                            .uri("/reconstruct-directory") // Specjalny endpoint dodany u rówieśników
+                            .uri("/reconstruct-directory") // Dedicated endpoint exposed by peers.
                             .retrieve()
-                            .bodyToMono(Map.class) // Odbieramy mapę [Nazwa_Zmiennej -> Wartość] z lokalnego cache węzła
+                            .bodyToMono(Map.class) // Receive [variableName -> value] from the peer's local cache.
                             .map(cacheMap -> Map.entry(entry.getKey(), cacheMap))
                             .onErrorResume(e -> Mono.empty());
                 })
@@ -148,21 +146,21 @@ public class BullyElectionService {
                     int peerId = entry.getKey();
                     Map<String, String> peerCache = entry.getValue();
 
-                    // Rejestrujemy dane w DirectoryManagerze nowego lidera
+                    // Register data in the new leader's DirectoryManager.
                     peerCache.forEach((variableName, value) -> {
                         directoryManager.registerVariablePresence(variableName, peerId);
                         directoryManager.updateMainMemoryValue(variableName, value);
                     });
-                    log.info("Pomyślnie zsynchronizowano i odtworzono stan dla zasobów od Węzła {}.", peerId);
+                    log.info("Successfully synchronized and restored resource state from Node {}.", peerId);
                 })
                 .then()
                 .doOnTerminate(() -> {
-                    // Dodatkowo, Lider dorzuca do katalogu i pamięci głównej to, co sam ma w pamięci podręcznej
+                    // Also add the leader's own local cache data to the directory and main memory.
                     localCache.getAll().forEach((varName, value) -> {
                         directoryManager.registerVariablePresence(varName, systemNode.getNodeId());
                         directoryManager.updateMainMemoryValue(varName, value);
                     });
-                    log.info("Rekonstrukcja katalogu zakończona sukcesem. Stan obecności i wartości odtworzony.");
+                    log.info("Directory reconstruction completed successfully. Presence and value state restored.");
                 })
                 .subscribe();
     }

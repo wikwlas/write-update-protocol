@@ -8,46 +8,46 @@ import org.springframework.integration.dsl.IntegrationFlow;
 import org.springframework.integration.ip.udp.UnicastReceivingChannelAdapter;
 
 /**
- * Klasa konfiguracyjna odpowiedzialna za uruchomienie serwera UDP.
- * Serwer ten nasłuchuje asynchronicznych sygnałów życiowych (Heartbeat)
- * wysyłanych przez pozostałe węzły w sieci P2P.
+ * Configuration class responsible for starting the UDP server.
+ * This server listens for asynchronous heartbeat signals sent by the remaining nodes
+ * in the P2P network.
  */
 @Configuration
 public class UdpConfig {
 
-    // Port UDP wstrzykiwany z pliku application.properties (np. udp.port=4444)
+    // UDP port injected from application.properties, for example udp.port=4444.
     @Value("${udp.port:4444}")
     private int udpPort;
 
     /**
-     * Konfiguracja adaptera wejściowego UDP (Inbound Channel Adapter).
-     * Adapter otwiera gniazdo (Socket) na określonym porcie i nasłuchuje pakietów.
+     * Configures the UDP inbound channel adapter.
+     * The adapter opens a socket on the selected port and listens for packets.
      */
     @Bean
     public UnicastReceivingChannelAdapter udpInboundAdapter() {
         UnicastReceivingChannelAdapter adapter = new UnicastReceivingChannelAdapter(udpPort);
-        // Opcjonalnie: ustawienie rozmiaru bufora (w bajtach) adekwatnie do małych pakietów Heartbeat
+        // Set a receive buffer size suitable for small heartbeat packets.
         adapter.setReceiveBufferSize(1024);
         return adapter;
     }
 
     /**
-     * Definicja potoku przetwarzania (Integration Flow) dla odebranych pakietów UDP.
-     * Pobiera surowy pakiet, konwertuje go na String i przekazuje do dedykowanego serwisu.
+     * Defines the processing pipeline (Integration Flow) for received UDP packets.
+     * Converts the raw packet to String and passes it to the dedicated service.
      *
-     * @param udpInboundAdapter adapter odbierający pakiety UDP
-     * @param heartbeatReceiver serwis przetwarzający logikę odebranego sygnału życiowego
+     * @param udpInboundAdapter adapter receiving UDP packets
+     * @param heartbeatReceiver service processing received heartbeat logic
      */
     @Bean
     public IntegrationFlow udpHeartbeatFlow(UnicastReceivingChannelAdapter udpInboundAdapter,
                                             UdpHeartbeatReceiver heartbeatReceiver) {
         return IntegrationFlow.from(udpInboundAdapter)
-                // Konwersja payloadu z byte[] na String (wsparcie dla czytelnego formatu komunikatów)
+                // Convert payload from byte[] to String for readable message formats.
                 .transform(byte[].class, String::new)
-                // Przekazanie przetworzonej wiadomości tekstowej do metody w serwisie odbiorczym
+                // Pass the processed text message to the receiver service method.
                 .handle(String.class, (payload, headers) -> {
                     heartbeatReceiver.processHeartbeat(payload);
-                    return null; // Strumień kończy się tutaj (fire-and-forget)
+                    return null; // The stream ends here (fire-and-forget).
                 })
                 .get();
     }

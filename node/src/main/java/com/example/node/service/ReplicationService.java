@@ -12,9 +12,9 @@ import reactor.core.publisher.Mono;
 import java.time.Duration;
 
 /**
- * Serwis odpowiedzialny za replikację danych w modelu Write-Update.
- * Kiedy zmienna zostanie zmodyfikowana, serwis ten asynchronicznie rozsyła
- * nową wartość do pozostałych węzłów za pomocą WebClienta (HTTP REST).
+ * Service responsible for data replication in the Write-Update model.
+ * When a variable changes, this service asynchronously sends the new value
+ * to the remaining nodes using WebClient (HTTP REST).
  */
 @Slf4j
 @Service
@@ -25,16 +25,16 @@ public class ReplicationService {
     private final WebClient.Builder webClientBuilder;
 
     /**
-     * Rozgłasza informację o aktualizacji zmiennej (Write-Update Broadcast)
-     * do wszystkich pozostałych aktywnych węzłów w klastrze P2P.
+     * Broadcasts variable update information (Write-Update Broadcast)
+     * to all remaining active nodes in the P2P cluster.
      *
-     * @param variableName nazwa modyfikowanej zmiennej (klucz)
-     * @param newValue nowa wartość zmiennej
+     * @param variableName name of the modified variable (key)
+     * @param newValue new variable value
      */
     public void broadcastUpdate(String variableName, String newValue) {
-        log.info("Inicjowanie asynchronicznego broadcastu Write-Update dla zmiennej: {} = {}", variableName, newValue);
+        log.info("Starting asynchronous Write-Update broadcast for variable: {} = {}", variableName, newValue);
 
-        // Tworzymy ujednolicony kontrakt danych JSON dla środowisk heterogenicznych (C#, Python)
+        // Create a unified JSON data contract for heterogeneous environments (C#, Python).
         CacheUpdateRequest updateRequest = new CacheUpdateRequest(
                 systemNode.getNodeId(),
                 variableName,
@@ -42,27 +42,27 @@ public class ReplicationService {
                 System.currentTimeMillis()
         );
 
-        // Iterujemy po mapie rówieśników sieciowych (Peers) i wysyłamy żądania równolegle
+        // Iterate over the peer map and send requests in parallel.
         Flux.fromIterable(systemNode.getPeers().entrySet())
                 .flatMap(entry -> {
                     int peerId = entry.getKey();
                     String peerUrl = entry.getValue();
 
-                    log.debug("Wysyłanie aktualizacji do Węzła {} na adres {}", peerId, peerUrl);
+                    log.debug("Sending update to Node {} at {}", peerId, peerUrl);
 
-                    // Konfiguracja i wykonanie asynchronicznego żądania POST za pomocą WebClienta
+                    // Configure and execute an asynchronous POST request using WebClient.
                     WebClient webClient = webClientBuilder.baseUrl(peerUrl).build();
 
                     return webClient.post()
-                            .uri("/force-update") // Punkt końcowy wymagany u rówieśników
+                            .uri("/force-update") // Endpoint required on peers.
                             .bodyValue(updateRequest)
                             .retrieve()
-                            .toBodilessEntity() // Interesuje nas tylko kod statusu HTTP (np. 200 OK)
-                            .timeout(Duration.ofMillis(1000)) // Maksymalnie 1 sekunda oczekiwania na połączenie sieciowe
-                            .doOnSuccess(response -> log.info("Węzeł {} pomyślnie zaktualizował pamięć podręczną.", peerId))
-                            .doOnError(error -> log.warn("Nie udało się zaktualizować Węzła {} (Węzeł może być offline lub obciążony): {}", peerId, error.getMessage()))
-                            .onErrorResume(e -> Mono.empty()); // Przechwytujemy błąd, aby awaria jednego węzła nie przerwała pętli dla innych
+                            .toBodilessEntity() // Only the HTTP status code matters here.
+                            .timeout(Duration.ofMillis(1000)) // Wait up to 1 second for network communication.
+                            .doOnSuccess(response -> log.info("Node {} successfully updated its cache.", peerId))
+                            .doOnError(error -> log.warn("Could not update Node {} (node may be offline or overloaded): {}", peerId, error.getMessage()))
+                            .onErrorResume(e -> Mono.empty()); // Swallow errors so one failed node does not stop the others.
                 })
-                .subscribe(); // KLUCZOWE: Uruchamia asynchroniczny proces w tle. Metoda główna natychmiast wraca do działania.
+                .subscribe(); // Starts the asynchronous background process; the main method returns immediately.
     }
 }

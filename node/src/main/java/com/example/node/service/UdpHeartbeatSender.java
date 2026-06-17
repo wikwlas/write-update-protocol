@@ -14,8 +14,8 @@ import java.net.DatagramSocket;
 import java.net.InetAddress;
 
 /**
- * Serwis odpowiedzialny za cykliczne wysyłanie sygnałów życiowych (Heartbeat)
- * przez bezpołączeniowy protokół UDP do pozostałych węzłów w sieci.
+ * Service responsible for periodically sending heartbeat signals
+ * to the remaining nodes over connectionless UDP.
  */
 @Slf4j
 @Service
@@ -23,13 +23,13 @@ import java.net.InetAddress;
 public class UdpHeartbeatSender {
 
     private final SystemNode systemNode;
-    private final ObjectMapper objectMapper; // Do generowania ujednoliconego formatu JSON
+    private final ObjectMapper objectMapper; // Generates a unified JSON format.
 
-    // Port UDP, na którym nasłuchują inne węzły (wstrzykiwany z application.properties)
+    // UDP port used by the other nodes, injected from application.properties.
     @Value("${udp.port:4444}")
     private int udpPort;
 
-    // Adresy IP pozostałych maszyn zdefiniowane w pliku properties
+    // IP addresses of the remaining machines, defined in the properties file.
     @Value("${peers.node1.ip:localhost}")
     private String node1Ip;
 
@@ -37,18 +37,18 @@ public class UdpHeartbeatSender {
     private String node2Ip;
 
     /**
-     * Metoda uruchamiana automatycznie w osobnym wątku co 2000 milisekund (2 sekundy).
-     * Wysyła asynchroniczne pakiety UDP w trybie "odpal i zapomnij" (fire-and-forget).
+     * Method automatically executed in a separate thread every 2000 ms (2 seconds).
+     * Sends asynchronous UDP packets in fire-and-forget mode.
      */
     @Scheduled(fixedRate = 2000)
     public void sendHeartbeats() {
-        // Pomijamy wysyłanie, jeśli węzeł jest w trakcie procedury wyborów (ELECTION)
+        // Skip sending while the node is taking part in an election.
         if ("ELECTION".equals(systemNode.getState())) {
             return;
         }
 
         try {
-            // Zabezpieczenie kontraktu danych (Zarzut 6): Tworzymy zwięzły obiekt JSON
+            // Build a compact JSON object for the shared data contract.
             ObjectNode heartbeatJson = objectMapper.createObjectNode();
             heartbeatJson.put("nodeId", systemNode.getNodeId());
             heartbeatJson.put("status", "ALIVE");
@@ -57,37 +57,37 @@ public class UdpHeartbeatSender {
             String jsonPayload = heartbeatJson.toString();
             byte[] buffer = jsonPayload.getBytes();
 
-            // Otwieramy gniazdo UDP (DatagramSocket automatycznie zamknie się dzięki try-with-resources)
+            // Open a UDP socket. try-with-resources closes the DatagramSocket automatically.
             try (DatagramSocket socket = new DatagramSocket()) {
 
-                // 1. Wysyłka do Węzła 1 (C# / Linux)
+                // 1. Send to Node 1 (C# / Linux).
                 if (systemNode.getNodeId() != 1) {
                     sendUdpPacket(socket, buffer, node1Ip);
                 }
 
-                // 2. Wysyłka do Węzła 2 (Python / macOS)
+                // 2. Send to Node 2 (Python / macOS).
                 if (systemNode.getNodeId() != 2) {
                     sendUdpPacket(socket, buffer, node2Ip);
                 }
             }
 
         } catch (Exception e) {
-            log.error("Krytyczny błąd podczas przygotowywania pakietu UDP Heartbeat: {}", e.getMessage());
+            log.error("Critical error while preparing UDP heartbeat packet: {}", e.getMessage());
         }
     }
 
     /**
-     * Pomocnicza metoda wysyłająca surowy pakiet danych pod wskazany adres IP.
+     * Helper method sending a raw packet to the selected IP address.
      */
     private void sendUdpPacket(DatagramSocket socket, byte[] buffer, String targetIp) {
         try {
             InetAddress address = InetAddress.getByName(targetIp);
             DatagramPacket packet = new DatagramPacket(buffer, buffer.length, address, udpPort);
             socket.send(packet);
-            log.debug("Wysłano UDP Heartbeat do adresu {}:{}", targetIp, udpPort);
+            log.debug("Sent UDP heartbeat to {}:{}", targetIp, udpPort);
         } catch (Exception e) {
-            // Logujemy jako debug/warn, ponieważ w systemie rozproszonym padnięty rówieśnik to norma, nie krytyczny błąd aplikacji
-            log.warn("Nie udało się wysłać pakietu UDP do {} (Węzeł może być offline): {}", targetIp, e.getMessage());
+            // Log as warning because an offline peer is expected in a distributed system.
+            log.warn("Could not send UDP packet to {} (node may be offline): {}", targetIp, e.getMessage());
         }
     }
 }
