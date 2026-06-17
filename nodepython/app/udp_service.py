@@ -27,8 +27,8 @@ def udp_sender_thread():
             
             for peer_id, peer_info in config.PEERS.items():
                 try:
-                    # FIXED: Utilizing peer-specific UDP ports to safely test on a single machine
-                    sock.sendto(message, (peer_info["ip"], peer_info["udp_port"]))
+                    target_udp_port = peer_info.get("udp_port", config.UDP_PORT)
+                    sock.sendto(message, (peer_info["ip"], target_udp_port))
                 except Exception as e:
                     logger.debug(f"Failed to transmit UDP heartbeat to Node {peer_id}: {e}")
                     
