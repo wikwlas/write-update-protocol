@@ -6,14 +6,17 @@ import logging
 from app import config
 
 logger = logging.getLogger(__name__)
-LAST_HEARTBEATS = {}  # Słownik przechowujący: {node_id: timestamp}
+
+# Dictionary tracking the last known contact time: {node_id: timestamp_ms}
+LAST_HEARTBEATS = {}  
 
 def udp_sender_thread():
-    """Wysyła pakiety UDP Heartbeat co 2 sekundy do rówieśników."""
-    # Tworzymy niskopoziomowe gniazdo UDP
+    """Broadcasts UDP Heartbeat packages every 2 seconds to configured peers."""
+    # Initialize a low-level UDP socket
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     
     while True:
+        # Pause heartbeats if this node is currently engaging in a Bully election
         if config.NODE_STATE != "ELECTION":
             payload = {
                 "nodeId": config.NODE_ID,
@@ -24,28 +27,31 @@ def udp_sender_thread():
             
             for peer_id, peer_info in config.PEERS.items():
                 try:
-                    sock.sendto(message, (peer_info["ip"], config.UDP_PORT))
+                    # FIXED: Utilizing peer-specific UDP ports to safely test on a single machine
+                    sock.sendto(message, (peer_info["ip"], peer_info["udp_port"]))
                 except Exception as e:
-                    logger.debug(f"Nie udało się wysłać UDP do Węzła {peer_id}: {e}")
+                    logger.debug(f"Failed to transmit UDP heartbeat to Node {peer_id}: {e}")
                     
         time.sleep(2)
 
 def udp_receiver_thread(start_election_callback):
-    """Nasłuchuje pakietów UDP i sprawdza timeouty rówieśników."""
+    """Listens for incoming UDP heartbeats and orchestrates peer timeout checks."""
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind((config.NODE_IP, config.UDP_PORT))
-    sock.settimeout(1.0) # Zapobiega wiecznemu blokowaniu wątku
+    sock.settimeout(1.0)  # Prevents the read operation from blocking the thread infinitely
     
-    # Wątek monitorujący timeouty (wewnątrz odbiornika)
+    # Internal daemon thread dedicated exclusively to checking leader timeouts
     def timeout_checker():
         while True:
             current_time = time.time() * 1000
-            # Jeśli aktualny lider nie przysłał sygnału przez 5 sekund -> Wybory!
+            
+            # If the current active leader fails to make contact within 5 seconds -> Trigger election!
             leader_last_contact = LAST_HEARTBEATS.get(config.CURRENT_LEADER)
             if leader_last_contact and (current_time - leader_last_contact) > 5000:
                 if config.NODE_STATE != "ELECTION":
-                    logger.warning(f"Wykryto timeout Lidera (Węzeł {config.CURRENT_LEADER}). Uruchamianie Bully...")
+                    logger.warning(f"Leader timeout detected (Node {config.CURRENT_LEADER}). Launching Bully algorithm...")
                     LAST_HEARTBEATS.clear()
+                    # Spin up the election process on a separate background thread
                     threading.Thread(target=start_election_callback).start()
             time.sleep(2)
             
@@ -56,8 +62,10 @@ def udp_receiver_thread(start_election_callback):
             data, addr = sock.recvfrom(1024)
             payload = json.loads(data.decode('utf-8'))
             sender_id = payload["nodeId"]
+            
+            # Record or update the timestamp for the sender node
             LAST_HEARTBEATS[sender_id] = time.time() * 1000
         except socket.timeout:
             continue
         except Exception as e:
-            logger.error(f"Błąd odbiornika UDP: {e}")
+            logger.error(f"UDP Receiver Exception occurred: {e}")
