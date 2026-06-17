@@ -30,8 +30,7 @@ builder.Services.AddHttpClient("peers", client =>
 var app = builder.Build();
 
 app.MapPost("/update-request", async Task<IResult> (
-    string key,
-    string value,
+    HttpRequest request,
     SystemNode systemNode,
     LocalCache localCache,
     DirectoryManager directoryManager,
@@ -40,9 +39,36 @@ app.MapPost("/update-request", async Task<IResult> (
     NodeOptions options,
     CancellationToken cancellationToken) =>
 {
+    var key = request.Query["key"].FirstOrDefault();
+    var value = request.Query["value"].FirstOrDefault();
+
+    if (request.HasJsonContentType())
+    {
+        UserUpdateRequest? body;
+        try
+        {
+            body = await request.ReadFromJsonAsync<UserUpdateRequest>(cancellationToken);
+        }
+        catch (JsonException)
+        {
+            return Results.BadRequest(new { error = "Invalid JSON request body." });
+        }
+
+        if (body is not null)
+        {
+            key = string.IsNullOrWhiteSpace(key) ? body.Key : key;
+            value = value is null ? body.Value : value;
+        }
+    }
+
     if (string.IsNullOrWhiteSpace(key))
     {
-        return Results.BadRequest(new { error = "Query parameter 'key' is required." });
+        return Results.BadRequest(new { error = "Request requires 'key' and 'value' as JSON fields or query parameters." });
+    }
+
+    if (value is null)
+    {
+        return Results.BadRequest(new { error = "Request requires 'key' and 'value' as JSON fields or query parameters." });
     }
 
     if (!systemNode.IsLeader)
@@ -58,9 +84,11 @@ app.MapPost("/update-request", async Task<IResult> (
             timeout.CancelAfter(TimeSpan.FromMilliseconds(options.RequestTimeoutMs));
 
             var client = httpClientFactory.CreateClient("peers");
-            var escapedKey = Uri.EscapeDataString(key);
-            var escapedValue = Uri.EscapeDataString(value);
-            var response = await client.PostAsync($"{leaderUrl}/update-request?key={escapedKey}&value={escapedValue}", null, timeout.Token);
+            var response = await client.PostAsJsonAsync($"{leaderUrl}/update-request", new UserUpdateRequest
+            {
+                Key = key,
+                Value = value
+            }, timeout.Token);
             var responseBody = await response.Content.ReadAsStringAsync(timeout.Token);
 
             return Results.Ok(new
@@ -152,7 +180,11 @@ app.MapGet("/cache/{key}", IResult (string key, LocalCache localCache) =>
         return Results.NotFound(new { error = "Key not found." });
     }
 
-    return Results.Text(value, "text/plain");
+    return Results.Ok(new
+    {
+        key,
+        value
+    });
 });
 
 app.MapGet("/cache", (LocalCache localCache) => Results.Ok(localCache.Snapshot()));

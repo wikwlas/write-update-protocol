@@ -5,8 +5,8 @@ This folder contains the Linux/WSL C# implementation of Node 1 for the directory
 ## Assumptions
 
 1. Node IDs follow the assignment: C# = 1, Python = 2, Java = 3.
-2. HTTP endpoints match the existing Java and Python code:
-   - `POST /update-request?key=<name>&value=<value>`
+2. HTTP endpoints match the shared JSON API contract in `docs/api-contract.openapi.yaml`:
+   - `POST /update-request`
    - `POST /force-update`
    - `POST /election`
    - `GET /reconstruct-directory`
@@ -51,7 +51,9 @@ curl http://localhost:8081/status
 Write through the cluster:
 
 ```bash
-curl -X POST "http://localhost:8081/update-request?key=x&value=123"
+curl -X POST http://localhost:8081/update-request \
+  -H "Content-Type: application/json" \
+  -d '{"key":"x","value":"123"}'
 ```
 
 Read local cache:

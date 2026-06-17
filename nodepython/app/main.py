@@ -1,6 +1,6 @@
 import logging
-import time
-from fastapi import FastAPI, BackgroundTasks, status, Query
+from typing import Optional
+from fastapi import FastAPI, BackgroundTasks, Body, status, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import uvicorn
@@ -20,7 +20,11 @@ class CacheUpdateRequest(BaseModel):
     senderNodeId: int
     variableName: str
     newValue: str
-    timestamp: int
+    timestamp: int = 0
+
+class UserUpdateRequest(BaseModel):
+    key: str
+    value: str
 
 class ElectionMessage(BaseModel):
     senderNodeId: int
@@ -37,8 +41,8 @@ def startup_event():
 async def handle_force_update(request: CacheUpdateRequest):
     """Endpoint triggered exclusively by the Leader node to forcefully broadcast and synchronize cache updates."""
     logger.info(f"Received Write-Update command from Leader: {request.variableName} = {request.newValue}")
-    database.local_cache.put(request.variableName, request.newValue)
-    return {"status": "SUCCESS"}
+    updated = database.local_cache.put(request.variableName, request.newValue, request.timestamp)
+    return {"status": "SUCCESS" if updated else "IGNORED_STALE_UPDATE"}
 
 @app.get("/reconstruct-directory")
 async def handle_reconstruct_directory():
@@ -75,45 +79,64 @@ async def get_cache_value(key: str):
     return JSONResponse(status_code=status.HTTP_404_NOT_FOUND, content={"error": "Key not found"})
 
 @app.post("/update-request")
-async def handle_user_update_request(key: str = Query(...), value: str = Query(...)):
+async def handle_user_update_request(
+    key: Optional[str] = Query(None),
+    value: Optional[str] = Query(None),
+    request: Optional[UserUpdateRequest] = Body(None),
+):
     """
     User-facing endpoint to write or modify transactional records.
     Operates as the authoritative Home Node leader if Python won the most recent Bully election.
     Otherwise, handles proxy delegation routing to the current remote Leader.
     """
+    if request is not None:
+        key = key or request.key
+        value = value if value is not None else request.value
+
+    if not key or value is None:
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={"error": "Request requires 'key' and 'value' as JSON fields or query parameters."}
+        )
+
     logger.info(f"Received a local write/update request: {key} = {value}")
 
     # 1. AUTHENTICATE LEADER ROLE
     if config.CURRENT_LEADER == config.NODE_ID:
         logger.info("Node 2 (Python) is currently acting as LEADER. Committing locally and broadcasting replication payload...")
 
-        # Mutate local secure cache instance
-        database.local_cache.put(key, value)
-        directory_manager.directory_manager.update_main_memory_value(key, value)
-        directory_manager.directory_manager.register_variable_presence(key, config.NODE_ID)
+        write_lock = directory_manager.directory_manager.get_variable_write_lock(key)
+        async with write_lock:
+            timestamp = directory_manager.directory_manager.next_write_timestamp(key)
 
-        # Structure standardized JSON payload architecture
-        replication_payload = {
-            "senderNodeId": config.NODE_ID,
-            "variableName": key,
-            "newValue": value,
-            "timestamp": int(time.time() * 1000)
-        }
+            # Mutate local secure cache instance
+            database.local_cache.put(key, value, timestamp)
+            directory_manager.directory_manager.update_main_memory_value(key, value)
+            directory_manager.directory_manager.register_variable_presence(key, config.NODE_ID)
 
-        # Handle distributed write-update broadcasting across known active cluster channels
-        async with httpx.AsyncClient() as client:
-            for peer_id, peer_info in config.PEERS.items():
-                try:
-                    logger.info(f"Replication Engine: Dispatching update down into Node {peer_id} at {peer_info['url']}/force-update")
-                    # Dispatched asynchronously using a non-blocking 1-second circuit-break timeout
-                    await client.post(
-                        f"{peer_info['url']}/force-update",
-                        json=replication_payload,
-                        timeout=1.0
-                    )
-                    directory_manager.directory_manager.register_variable_presence(key, peer_id)
-                except Exception as e:
-                    logger.warning(f"Failed to cleanly replicate state updates down into Node {peer_id}: {e}")
+            # Structure standardized JSON payload architecture
+            replication_payload = {
+                "senderNodeId": config.NODE_ID,
+                "variableName": key,
+                "newValue": value,
+                "timestamp": timestamp
+            }
+
+            # Handle distributed write-update broadcasting across known active cluster channels
+            async with httpx.AsyncClient() as client:
+                for peer_id, peer_info in config.PEERS.items():
+                    try:
+                        logger.info(f"Replication Engine: Dispatching update down into Node {peer_id} at {peer_info['url']}/force-update")
+                        # Dispatched with a non-blocking 1-second circuit-break timeout
+                        response = await client.post(
+                            f"{peer_info['url']}/force-update",
+                            json=replication_payload,
+                            timeout=1.0
+                        )
+                        response.raise_for_status()
+                        directory_manager.directory_manager.register_variable_presence(key, peer_id)
+                    except Exception as e:
+                        logger.warning(f"Failed to cleanly replicate state updates down into Node {peer_id}: {e}")
 
         return {"status": "SUCCESS", "message": "Variable committed and replicated globally by Leader (Python)."}
 
@@ -128,7 +151,7 @@ async def handle_user_update_request(key: str = Query(...), value: str = Query(.
         async with httpx.AsyncClient() as client:
             try:
                 # Forward state query strings to the authoritative engine leader (Java/.NET)
-                response = await client.post(target_url, params={"key": key, "value": value}, timeout=2.0)
+                response = await client.post(target_url, json={"key": key, "value": value}, timeout=2.0)
 
                 # Safely parse plaintext string responses out of the foreign Leader cluster
                 return JSONResponse(

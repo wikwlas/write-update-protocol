@@ -1,5 +1,7 @@
+import asyncio
 import logging
 import threading
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -8,7 +10,25 @@ class DirectoryManager:
     def __init__(self):
         self._presence_list = {}
         self._main_memory = {}
+        self._variable_write_locks = {}
+        self._variable_write_timestamps = {}
         self._lock = threading.RLock()
+
+    def get_variable_write_lock(self, variable_name: str):
+        with self._lock:
+            lock = self._variable_write_locks.get(variable_name)
+            if lock is None:
+                lock = asyncio.Lock()
+                self._variable_write_locks[variable_name] = lock
+            return lock
+
+    def next_write_timestamp(self, variable_name: str):
+        with self._lock:
+            now = int(time.time() * 1000)
+            last_timestamp = self._variable_write_timestamps.get(variable_name, 0)
+            timestamp = now if now > last_timestamp else last_timestamp + 1
+            self._variable_write_timestamps[variable_name] = timestamp
+            return timestamp
 
     def register_variable_presence(self, variable_name: str, node_id: int):
         with self._lock:
@@ -41,6 +61,8 @@ class DirectoryManager:
         with self._lock:
             self._presence_list.clear()
             self._main_memory.clear()
+            self._variable_write_locks.clear()
+            self._variable_write_timestamps.clear()
             logger.info("Directory Manager: cleared state before reconstruction.")
 
     def snapshot(self):

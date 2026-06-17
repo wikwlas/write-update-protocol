@@ -1,30 +1,30 @@
 {
   "format": 1,
   "restore": {
-    "/home/bruno/wiczkowe_nody-main/nodecsharp/CacheNode.csproj": {}
+    "/app/CacheNode.csproj": {}
   },
   "projects": {
-    "/home/bruno/wiczkowe_nody-main/nodecsharp/CacheNode.csproj": {
+    "/app/CacheNode.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "/home/bruno/wiczkowe_nody-main/nodecsharp/CacheNode.csproj",
+        "projectUniqueName": "/app/CacheNode.csproj",
         "projectName": "CacheNode",
-        "projectPath": "/home/bruno/wiczkowe_nody-main/nodecsharp/CacheNode.csproj",
-        "packagesPath": "/home/bruno/.nuget/packages/",
-        "outputPath": "/home/bruno/wiczkowe_nody-main/nodecsharp/obj/",
+        "projectPath": "/app/CacheNode.csproj",
+        "packagesPath": "/root/.nuget/packages/",
+        "outputPath": "/app/obj/",
         "projectStyle": "PackageReference",
         "configFilePaths": [
-          "/home/bruno/.nuget/NuGet/NuGet.Config"
+          "/root/.nuget/NuGet/NuGet.Config"
         ],
         "originalTargetFrameworks": [
           "net10.0"
         ],
         "sources": {
-          "/usr/lib/dotnet/library-packs": {},
           "https://api.nuget.org/v3/index.json": {}
         },
         "frameworks": {
           "net10.0": {
+            "framework": "net10.0",
             "targetAlias": "net10.0",
             "projectReferences": {}
           }
@@ -39,10 +39,11 @@
           "auditLevel": "low",
           "auditMode": "all"
         },
-        "SdkAnalysisLevel": "10.0.100"
+        "SdkAnalysisLevel": "10.0.300"
       },
       "frameworks": {
         "net10.0": {
+          "framework": "net10.0",
           "targetAlias": "net10.0",
           "imports": [
             "net461",
@@ -63,7 +64,7 @@
               "privateAssets": "all"
             }
           },
-          "runtimeIdentifierGraphPath": "/usr/lib/dotnet/sdk/10.0.108/PortableRuntimeIdentifierGraph.json",
+          "runtimeIdentifierGraphPath": "/usr/share/dotnet/sdk/10.0.301/PortableRuntimeIdentifierGraph.json",
           "packagesToPrune": {
             "Microsoft.AspNetCore": "(,10.0.32767]",
             "Microsoft.AspNetCore.Antiforgery": "(,10.0.32767]",

@@ -1,0 +1,240 @@
+openapi: 3.0.3
+info:
+  title: Directory-Based Cache Coherence Node API
+  version: 1.0.0
+  description: Common JSON contract shared by the Java, Python, and C# nodes.
+servers:
+  - url: http://localhost:8081
+    description: Node 1 C# default
+  - url: http://localhost:8082
+    description: Node 2 Python default
+  - url: http://localhost:8083
+    description: Node 3 Java default
+paths:
+  /update-request:
+    post:
+      summary: Request a variable update through the current leader
+      description: Preferred form is JSON. Query parameters key/value remain supported for backward compatibility.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserUpdateRequest'
+      parameters:
+        - in: query
+          name: key
+          schema:
+            type: string
+          required: false
+        - in: query
+          name: value
+          schema:
+            type: string
+          required: false
+      responses:
+        '200':
+          description: Update accepted or proxied to the leader
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateResponse'
+        '400':
+          description: Invalid request payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Leader is unknown or unreachable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /force-update:
+    post:
+      summary: Replicate a leader-approved cache update to a peer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CacheUpdateRequest'
+      responses:
+        '200':
+          description: Update applied or ignored as stale
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ForceUpdateResponse'
+        '400':
+          description: Invalid request payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /election:
+    post:
+      summary: Exchange Bully election protocol messages
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ElectionMessage'
+      responses:
+        '200':
+          description: Election message handled
+        '400':
+          description: Unsupported message type
+  /reconstruct-directory:
+    get:
+      summary: Return local cache snapshot for leader directory reconstruction
+      responses:
+        '200':
+          description: Local cache snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CacheSnapshot'
+  /cache/{key}:
+    get:
+      summary: Read a local cached value
+      parameters:
+        - in: path
+          name: key
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Cached value found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CacheValueResponse'
+        '404':
+          description: Key not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /status:
+    get:
+      summary: Return node, cache, and directory diagnostics
+      responses:
+        '200':
+          description: Node status snapshot
+components:
+  schemas:
+    UserUpdateRequest:
+      type: object
+      required:
+        - key
+        - value
+      properties:
+        key:
+          type: string
+          minLength: 1
+          description: Variable name.
+        value:
+          type: string
+          description: Variable value encoded as UTF-8 JSON string.
+    CacheUpdateRequest:
+      type: object
+      required:
+        - senderNodeId
+        - variableName
+        - newValue
+        - timestamp
+      properties:
+        senderNodeId:
+          type: integer
+          format: int32
+        variableName:
+          type: string
+          minLength: 1
+        newValue:
+          type: string
+        timestamp:
+          type: integer
+          format: int64
+          minimum: 0
+    ElectionMessage:
+      type: object
+      required:
+        - senderNodeId
+        - type
+      properties:
+        senderNodeId:
+          type: integer
+          format: int32
+        type:
+          type: string
+          enum:
+            - ELECTION
+            - COORDINATOR
+    CacheSnapshot:
+      type: object
+      additionalProperties:
+        type: string
+    UpdateResponse:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+        message:
+          type: string
+        key:
+          type: string
+        value:
+          type: string
+        timestamp:
+          type: integer
+          format: int64
+        leaderId:
+          type: integer
+          format: int32
+        leaderResponse:
+          oneOf:
+            - type: object
+              additionalProperties: true
+            - type: string
+    ForceUpdateResponse:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum:
+            - SUCCESS
+            - IGNORED_STALE_UPDATE
+        key:
+          type: string
+        value:
+          type: string
+        timestamp:
+          type: integer
+          format: int64
+    CacheValueResponse:
+      type: object
+      required:
+        - key
+        - value
+      properties:
+        key:
+          type: string
+        value:
+          type: string
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+        key:
+          type: string

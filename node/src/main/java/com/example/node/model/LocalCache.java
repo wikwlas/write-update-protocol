@@ -20,6 +20,9 @@ public class LocalCache {
     // Thread-safe map storing local copies of cluster variables.
     private final Map<String, String> cacheStorage = new ConcurrentHashMap<>();
 
+    // Per-variable versions used to ignore stale Write-Update messages.
+    private final Map<String, Long> cacheTimestamps = new ConcurrentHashMap<>();
+
     // Map storing dedicated locks per variable (granular locking).
     private final Map<String, ReentrantLock> variableLocks = new ConcurrentHashMap<>();
 
@@ -42,14 +45,32 @@ public class LocalCache {
      * @param variableName variable name
      * @param value new value to store
      */
-    public void put(String variableName, String value) {
+    public boolean put(String variableName, String value) {
+        return put(variableName, value, System.currentTimeMillis());
+    }
+
+    public boolean put(String variableName, String value, long timestamp) {
         // Fetch the existing lock for this variable or create one for the first write.
         ReentrantLock lock = variableLocks.computeIfAbsent(variableName, k -> new ReentrantLock());
 
         lock.lock(); // Lock the critical write section for this variable.
         try {
+            long effectiveTimestamp = timestamp > 0 ? timestamp : System.currentTimeMillis();
+            Long currentTimestamp = cacheTimestamps.get(variableName);
+            if (currentTimestamp != null && currentTimestamp > effectiveTimestamp) {
+                log.info(
+                        "Local Cache: ignored stale update for '{}' with timestamp {}. Current timestamp is {}.",
+                        variableName,
+                        effectiveTimestamp,
+                        currentTimestamp
+                );
+                return false;
+            }
+
             cacheStorage.put(variableName, value);
+            cacheTimestamps.put(variableName, effectiveTimestamp);
             log.info("Local Cache: updated variable state '{}' = '{}'", variableName, value);
+            return true;
         } finally {
             lock.unlock(); // Always release the lock in finally.
         }
@@ -64,6 +85,7 @@ public class LocalCache {
             lock.lock();
             try {
                 cacheStorage.remove(variableName);
+                cacheTimestamps.remove(variableName);
                 variableLocks.remove(variableName);
                 log.info("Local Cache: removed variable '{}' from cache.", variableName);
             } finally {
@@ -71,6 +93,7 @@ public class LocalCache {
             }
         } else {
             cacheStorage.remove(variableName);
+            cacheTimestamps.remove(variableName);
         }
     }
 
@@ -88,6 +111,7 @@ public class LocalCache {
      */
     public void clear() {
         cacheStorage.clear();
+        cacheTimestamps.clear();
         variableLocks.clear();
         log.info("Local Cache was fully cleared.");
     }

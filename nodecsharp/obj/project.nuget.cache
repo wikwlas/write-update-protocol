@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "dgSpecHash": "6io8sFr+F8A=",
+  "dgSpecHash": "Or1/GRm3xGU=",
   "success": true,
-  "projectFilePath": "/home/bruno/wiczkowe_nody-main/nodecsharp/CacheNode.csproj",
+  "projectFilePath": "/app/CacheNode.csproj",
   "expectedPackageFiles": [],
   "logs": []
 }

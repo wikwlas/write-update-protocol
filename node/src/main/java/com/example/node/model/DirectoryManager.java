@@ -7,7 +7,9 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.function.Supplier;
 
 /**
  * Component managing the global coherence directory (Directory Manager).
@@ -28,6 +30,32 @@ public class DirectoryManager {
 
     // Read/write lock protecting structure consistency against race conditions.
     private final ReentrantReadWriteLock rwLock = new ReentrantReadWriteLock();
+
+    // Per-variable write queues serialize complete leader-side write propagation.
+    private final Map<String, ReentrantLock> variableWriteLocks = new ConcurrentHashMap<>();
+
+    // Monotonic write timestamps per variable avoid ties for rapid consecutive writes.
+    private final Map<String, Long> variableWriteTimestamps = new ConcurrentHashMap<>();
+
+    public <T> T withVariableWriteLock(String variableName, Supplier<T> work) {
+        ReentrantLock lock = variableWriteLocks.computeIfAbsent(variableName, key -> new ReentrantLock());
+        lock.lock();
+        try {
+            return work.get();
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    public long nextWriteTimestamp(String variableName) {
+        return variableWriteTimestamps.compute(variableName, (key, lastTimestamp) -> {
+            long now = System.currentTimeMillis();
+            if (lastTimestamp == null || now > lastTimestamp) {
+                return now;
+            }
+            return lastTimestamp + 1;
+        });
+    }
 
     /**
      * Registers that a given node holds a copy of the selected variable in its cache.
@@ -93,6 +121,8 @@ public class DirectoryManager {
         try {
             presenceList.clear();
             mainMemory.clear();
+            variableWriteLocks.clear();
+            variableWriteTimestamps.clear();
             log.info("Global directory was reset and cleared for state reconstruction.");
         } finally {
             rwLock.writeLock().unlock();
