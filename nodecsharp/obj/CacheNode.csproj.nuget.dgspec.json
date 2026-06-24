@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "/app/CacheNode.csproj": {}
+    "/src/CacheNode.csproj": {}
   },
   "projects": {
-    "/app/CacheNode.csproj": {
+    "/src/CacheNode.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "/app/CacheNode.csproj",
+        "projectUniqueName": "/src/CacheNode.csproj",
         "projectName": "CacheNode",
-        "projectPath": "/app/CacheNode.csproj",
+        "projectPath": "/src/CacheNode.csproj",
         "packagesPath": "/root/.nuget/packages/",
-        "outputPath": "/app/obj/",
+        "outputPath": "/src/obj/",
         "projectStyle": "PackageReference",
         "configFilePaths": [
           "/root/.nuget/NuGet/NuGet.Config"

@@ -18,6 +18,8 @@ public sealed class UdpHeartbeatService : BackgroundService
     private readonly DirectoryManager _directoryManager;
     private readonly ILogger<UdpHeartbeatService> _logger;
     private readonly long _startedAt = TimeProvider.UnixMilliseconds();
+    private int _watchedLeaderId;
+    private long _leaderWatchStartedAt;
 
     public UdpHeartbeatService(
         SystemNode systemNode,
@@ -31,6 +33,8 @@ public sealed class UdpHeartbeatService : BackgroundService
         _electionService = electionService;
         _directoryManager = directoryManager;
         _logger = logger;
+        _watchedLeaderId = systemNode.LeaderId;
+        _leaderWatchStartedAt = _startedAt;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -120,10 +124,11 @@ public sealed class UdpHeartbeatService : BackgroundService
                             continue;
                         }
 
-                        var endPoint = new IPEndPoint(addresses[0], _options.UdpPort);
+                        var targetUdpPort = peer.UdpPort > 0 ? peer.UdpPort : _options.UdpPort;
+                        var endPoint = new IPEndPoint(addresses[0], targetUdpPort);
                         await udpClient.SendAsync(bytes, bytes.Length, endPoint);
 
-                        _logger.LogDebug("Sent UDP heartbeat to Node {PeerId} at {PeerIp}:{UdpPort}.", peerId, peer.Ip, _options.UdpPort);
+                        _logger.LogDebug("Sent UDP heartbeat to Node {PeerId} at {PeerIp}:{UdpPort}.", peerId, peer.Ip, targetUdpPort);
                     }
                 }
 
@@ -149,6 +154,14 @@ public sealed class UdpHeartbeatService : BackgroundService
             {
                 var now = TimeProvider.UnixMilliseconds();
 
+                var leaderId = _systemNode.LeaderId;
+                if (_watchedLeaderId != leaderId)
+                {
+                    _watchedLeaderId = leaderId;
+                    _leaderWatchStartedAt = now;
+                    _logger.LogInformation("Now watching Node {LeaderId} for leader heartbeats.", leaderId);
+                }
+
                 foreach (var peerId in _systemNode.Peers.Keys)
                 {
                     if (_lastHeartbeats.TryGetValue(peerId, out var lastSeen) && now - lastSeen > _options.HeartbeatTimeoutMs)
@@ -157,19 +170,21 @@ public sealed class UdpHeartbeatService : BackgroundService
                         _directoryManager.RemoveNodeFromPresence(peerId);
                         _logger.LogWarning("Node {PeerId} heartbeat timed out.", peerId);
 
-                        if (_systemNode.LeaderId == peerId)
+                        if (leaderId == peerId)
                         {
+                            _leaderWatchStartedAt = now;
                             _ = Task.Run(() => _electionService.StartElectionAsync(cancellationToken), cancellationToken);
                         }
                     }
                 }
 
-                if (!_systemNode.IsLeader && !_lastHeartbeats.ContainsKey(_systemNode.LeaderId))
+                if (!_systemNode.IsLeader && !_lastHeartbeats.ContainsKey(leaderId))
                 {
                     var startupGracePeriodMs = _options.HeartbeatTimeoutMs + _options.HeartbeatIntervalMs;
-                    if (now - _startedAt > startupGracePeriodMs)
+                    if (now - _leaderWatchStartedAt > startupGracePeriodMs)
                     {
-                        _logger.LogWarning("No heartbeat received from initial leader Node {LeaderId}. Starting election.", _systemNode.LeaderId);
+                        _logger.LogWarning("No heartbeat received from leader Node {LeaderId}. Starting election.", leaderId);
+                        _leaderWatchStartedAt = now;
                         _ = Task.Run(() => _electionService.StartElectionAsync(cancellationToken), cancellationToken);
                     }
                 }

@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "dgSpecHash": "Or1/GRm3xGU=",
+  "dgSpecHash": "C6hOGS0i/9M=",
   "success": true,
-  "projectFilePath": "/app/CacheNode.csproj",
+  "projectFilePath": "/src/CacheNode.csproj",
   "expectedPackageFiles": [],
   "logs": []
 }
