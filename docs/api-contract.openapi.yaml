@@ -1,9 +1,15 @@
 openapi: 3.0.3
 info:
   title: Directory-Based Cache Coherence Node API
-  version: 1.0.0
+  version: 1.1.0
   description: Common JSON contract shared by the Java, Python, and C# nodes.
 servers:
+  - url: http://172.20.10.9:8081
+    description: Node 1 C# current LAN demo
+  - url: http://172.20.10.9:8082
+    description: Node 2 Python current LAN demo
+  - url: http://172.20.10.8:8083
+    description: Node 3 Java current LAN demo
   - url: http://localhost:8081
     description: Node 1 C# default
   - url: http://localhost:8082

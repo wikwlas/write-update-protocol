@@ -135,6 +135,18 @@ public class CacheRestController {
         return ResponseEntity.ok(localCache.getAll());
     }
 
+    @GetMapping("/status")
+    public ResponseEntity<Map<String, Object>> getStatus() {
+        return ResponseEntity.ok(Map.of(
+                "nodeId", systemNode.getNodeId(),
+                "leaderId", systemNode.getLeaderId(),
+                "isLeader", systemNode.isLeader(),
+                "state", systemNode.getState(),
+                "cache", localCache.getAll(),
+                "directory", directoryManager.snapshot()
+        ));
+    }
+
     /**
      * Handles network messages for the leader election protocol (Bully Algorithm).
      */

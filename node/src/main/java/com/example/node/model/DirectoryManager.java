@@ -10,6 +10,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 /**
  * Component managing the global coherence directory (Directory Manager).
@@ -143,6 +144,24 @@ public class DirectoryManager {
             });
         } finally {
             rwLock.writeLock().unlock();
+        }
+    }
+
+    public Map<String, Object> snapshot() {
+        rwLock.readLock().lock();
+        try {
+            Map<String, Set<Integer>> presenceSnapshot = presenceList.entrySet().stream()
+                    .collect(Collectors.toMap(
+                            Map.Entry::getKey,
+                            entry -> new HashSet<>(entry.getValue())
+                    ));
+
+            return Map.of(
+                    "presenceList", presenceSnapshot,
+                    "mainMemory", new ConcurrentHashMap<>(mainMemory)
+            );
+        } finally {
+            rwLock.readLock().unlock();
         }
     }
 }
