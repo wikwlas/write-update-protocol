@@ -197,7 +197,6 @@ app.MapGet("/status", (SystemNode systemNode, LocalCache localCache, DirectoryMa
         leaderId = systemNode.LeaderId,
         isLeader = systemNode.IsLeader,
         state = systemNode.State,
-        peers = systemNode.Peers,
         cache = localCache.Snapshot(),
         directory = directoryManager.Snapshot()
     });
